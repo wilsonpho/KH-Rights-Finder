@@ -20,3 +20,6 @@ pgdata/
 .idea/
 *.swp
 .DS_Store
+
+# Local scraper snapshots
+/data/snapshots/
