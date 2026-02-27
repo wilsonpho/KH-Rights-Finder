@@ -1,13 +1,26 @@
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.models import Base
+# Ensure the project root (/app in Docker) is importable so that
+# `from app.models import Base` works when alembic is invoked as a
+# console script (which does NOT add CWD to sys.path).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.models import Base  # noqa: E402
 
 config = context.config
+
+# Prefer DATABASE_URL from the environment over alembic.ini's hardcoded value.
+_db_url = os.environ.get("DATABASE_URL")
+if _db_url:
+    config.set_main_option("sqlalchemy.url", _db_url)
+
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 

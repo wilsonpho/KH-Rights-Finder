@@ -76,6 +76,8 @@ class Evidence(Base):
         CheckConstraint("source_type IN ('authoritative', 'secondary')"),
         nullable=False,
     )
+    evidence_kind: Mapped[Optional[str]] = mapped_column(Text)
+    schema_version: Mapped[Optional[int]] = mapped_column(SmallInteger)
     title: Mapped[Optional[str]] = mapped_column(Text)
     detail: Mapped[Optional[Dict]] = mapped_column(JSONB)
     snapshot_id: Mapped[Optional[uuid.UUID]] = mapped_column(

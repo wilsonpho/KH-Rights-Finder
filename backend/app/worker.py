@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import async_session
+from app.evidence_schemas import parse_evidence
 from app.models import Evidence, IngestionJob, Mark, Snapshot, WatchlistEntry
 from app.queue import Job, JobQueue
 import app.scrapers  # noqa: F401  — triggers @register_scraper decorators
@@ -118,21 +119,27 @@ async def _store_evidence(
     source_type = "authoritative" if source in ("dip_trademark", "dip_exclusive") else "secondary"
 
     for r in results:
-        # Save snapshot if raw content provided
         snapshot_id = None
         if r.raw_content:
             snapshot_id = await _save_snapshot(
                 session, job_id, source, r.source_url or "", r.raw_content, r.content_type or "text/html"
             )
 
+        structured, evidence_kind, schema_version = parse_evidence(source, r.detail)
+        confidence = r.confidence
+        if structured.pop("_validation_failed", False):
+            confidence = 20
+
         evidence = Evidence(
             mark_id=mark_id,
             source=source,
             source_type=source_type,
             title=r.title,
-            detail=r.detail,
+            detail=structured,
+            evidence_kind=evidence_kind,
+            schema_version=schema_version,
             snapshot_id=snapshot_id,
-            confidence=r.confidence,
+            confidence=confidence,
         )
         session.add(evidence)
 

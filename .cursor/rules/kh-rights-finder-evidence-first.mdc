@@ -1,0 +1,24 @@
+---
+description: Core project principles for KH Rights Finder — evidence-first data handling, auditability, and workflow hygiene.
+alwaysApply: true
+---
+
+# KH Rights Finder – Evidence-first
+
+## Data sourcing & scoring
+
+- Cambodia authoritative sources are **Tier A** and the only drivers of verdict/risk scoring.
+- Never infer missing fields. If a value is not present in the source or snapshot, set it to `null` and append an entry to `parse_warnings`.
+
+## Auditability
+
+- Always persist `raw_text` plus a saved snapshot reference so every extracted fact can be traced back to its source.
+
+## Workflow hygiene
+
+- **One task per chat.** If asked for backend-only work, do not touch frontend files (and vice versa).
+
+## Testing & migrations
+
+- Include tests for any backend logic changes.
+- Include an Alembic migration for any DB schema changes.
