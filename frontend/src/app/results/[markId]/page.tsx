@@ -168,7 +168,7 @@ export default function ResultsPage() {
           </h2>
           <div className="space-y-3">
             {authEvidence.map((e) => (
-              <EvidenceCard key={e.id} item={e} />
+              <EvidenceCard key={e.id} item={e} markName={data.mark.name} />
             ))}
           </div>
         </section>
@@ -182,7 +182,7 @@ export default function ResultsPage() {
           </h2>
           <div className="space-y-3">
             {secEvidence.map((e) => (
-              <EvidenceCard key={e.id} item={e} />
+              <EvidenceCard key={e.id} item={e} markName={data.mark.name} />
             ))}
           </div>
         </section>
