@@ -8,7 +8,7 @@ Create Date: 2026-02-27
 """
 
 from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
 
 revision = "002"
 down_revision = "001"
@@ -17,10 +17,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("evidence", sa.Column("evidence_kind", sa.Text(), nullable=True))
-    op.add_column("evidence", sa.Column("schema_version", sa.SmallInteger(), nullable=True))
+    # IF NOT EXISTS guards against drift caused by Base.metadata.create_all()
+    # running at app startup before Alembic has a chance to track the columns.
+    op.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS evidence_kind TEXT")
+    op.execute("ALTER TABLE evidence ADD COLUMN IF NOT EXISTS schema_version SMALLINT")
 
 
 def downgrade() -> None:
-    op.drop_column("evidence", "schema_version")
-    op.drop_column("evidence", "evidence_kind")
+    op.execute("ALTER TABLE evidence DROP COLUMN IF EXISTS schema_version")
+    op.execute("ALTER TABLE evidence DROP COLUMN IF EXISTS evidence_kind")

@@ -102,34 +102,48 @@ class ExclusiveRightsEvidenceV1(BaseModel):
 # ---------------------------------------------------------------------------
 
 _TRADEMARK_FIELD_MAP: Dict[str, str] = {
+    # Mark name
     "mark": "mark_name",
     "mark name": "mark_name",
+    # Owner
     "owner": "owner_name",
     "owner name": "owner_name",
     "owner_name": "owner_name",
+    # Owner address
     "address": "owner_address",
     "owner address": "owner_address",
     "owner_address": "owner_address",
+    # Application number
     "app. no.": "application_number",
     "app no": "application_number",
     "application number": "application_number",
     "application_number": "application_number",
+    # Registration number
     "reg. no.": "registration_number",
     "reg no": "registration_number",
     "registration number": "registration_number",
     "registration_number": "registration_number",
+    # Status
     "status": "status",
+    # Dates — DIP uses "application date" rather than "filing date"
     "filing date": "filing_date_raw",
     "filing_date": "filing_date_raw",
+    "application date": "filing_date_raw",
     "registration date": "registration_date_raw",
     "registration_date": "registration_date_raw",
     "expiry date": "expiry_date_raw",
     "expiry_date": "expiry_date_raw",
+    # Classification
     "class": "class_numbers_raw",
     "class_numbers": "class_numbers_raw",
+    "nice classification": "class_numbers_raw",
+    "international class": "class_numbers_raw",
+    # Goods/services
     "goods/services": "goods_services",
     "goods_services": "goods_services",
     "goods services": "goods_services",
+    "goods & services": "goods_services",
+    "goods and services": "goods_services",
 }
 
 _EXCLUSIVE_FIELD_MAP: Dict[str, str] = {
@@ -172,7 +186,9 @@ def parse_evidence(
     fallback with ``_validation_failed = True`` so the caller can
     lower confidence.
     """
-    raw_text = json.dumps(detail, sort_keys=True, default=str)
+    raw_text = detail.pop("_raw_text", None)
+    json_text = json.dumps(detail, sort_keys=True, default=str)
+    raw_text = raw_text or json_text
 
     cfg = _SOURCE_CONFIG.get(source)
     if cfg is None:
@@ -223,7 +239,8 @@ def _normalise_keys(detail: dict, field_map: Dict[str, str]) -> dict:
     """Remap scraper-produced keys to schema field names."""
     out: dict = {}
     for key, value in detail.items():
-        canonical = field_map.get(key.lower().strip(), key)
+        cleaned = key.lower().strip().rstrip(":").strip()
+        canonical = field_map.get(cleaned, cleaned)
         if value == "" or value is None:
             continue
         out[canonical] = value

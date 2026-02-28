@@ -216,36 +216,39 @@ class DIPTrademarkScraper(BaseScraper):
 
     @staticmethod
     def _extract_table_rows(table: Tag, raw_bytes: bytes) -> list[ScraperResult]:
-        rows = table.find_all("tr")
-        if len(rows) < 2:
+        """Parse DIP GridView whose rows each wrap a nested layout table.
+
+        Each outer <tr> contains one <td> with:
+          - an <h5> holding the mark name
+          - a <table class="info-list-detail"> with label/value rows
+        """
+        outer_rows = table.find_all("tr", recursive=False)
+        if not outer_rows:
             return []
 
-        headers = [
-            th.get_text(strip=True).lower() for th in rows[0].find_all(["th", "td"])
-        ]
         results: list[ScraperResult] = []
 
-        for row in rows[1:]:
-            cols = row.find_all("td")
-            if not cols:
+        for outer_tr in outer_rows:
+            detail = _parse_record_cell(outer_tr)
+            if detail is None:
                 continue
 
-            detail: dict = {}
-            for i, col in enumerate(cols):
-                text = col.get_text(strip=True)
-                if i < len(headers):
-                    detail[headers[i]] = text
-                else:
-                    detail[f"col_{i}"] = text
-
-            title = detail.get("mark", detail.get("mark name", detail.get("col_0", "")))
-            status = detail.get("status", detail.get("col_4", "")).lower()
+            mark_name = detail.get("mark name") or ""
+            raw_status = detail.get("status")
+            status = raw_status.lower().strip() if isinstance(raw_status, str) and raw_status.strip() else None
             detail["status"] = status
 
+            raw_lines = [mark_name] if mark_name else []
+            for k, v in detail.items():
+                if k == "mark name" or not v:
+                    continue
+                raw_lines.append(f"{k}: {v}")
+            detail["_raw_text"] = "\n".join(raw_lines)
+
             results.append(ScraperResult(
-                title=title or _mark_name_fallback(detail),
+                title=mark_name or _mark_name_fallback(detail),
                 detail=detail,
-                confidence=80 if "registered" in status else 50,
+                confidence=80 if status and "registered" in status else 50,
                 raw_content=raw_bytes,
                 content_type="text/html",
                 source_url=SEARCH_URL,
@@ -320,6 +323,48 @@ class DIPTrademarkScraper(BaseScraper):
             logger.info("Saved debug snapshot → %s (%d bytes)", path, len(raw_bytes))
         except OSError:
             logger.exception("Failed to write debug snapshot")
+
+
+def _normalise_label(raw_label: str) -> str:
+    """Lowercase, strip whitespace and trailing colons/punctuation."""
+    label = raw_label.strip().rstrip(":").strip()
+    label = re.sub(r"\s+", " ", label)
+    return label.lower()
+
+
+def _parse_record_cell(outer_tr: Tag) -> dict | None:
+    """Extract a single trademark record from an outer GridView <tr>.
+
+    Returns a flat dict with normalised label keys, or None if the row
+    doesn't contain a recognisable record structure.
+    """
+    h5 = outer_tr.find("h5")
+    info_table = outer_tr.find("table", class_=lambda c: c and "info-list" in str(c))
+    if not info_table:
+        info_table = outer_tr.find("table")
+    if info_table is None and h5 is None:
+        return None
+
+    detail: dict = {}
+
+    if h5:
+        detail["mark name"] = h5.get_text(strip=True)
+
+    if info_table is not None:
+        for tr in info_table.find_all("tr", recursive=False):
+            cells = tr.find_all("td", recursive=False)
+            if len(cells) < 2:
+                continue
+            label_tag = cells[0].find("p")
+            raw_label = (label_tag.get_text(strip=True) if label_tag
+                         else cells[0].get_text(strip=True))
+            if not raw_label:
+                continue
+            label = _normalise_label(raw_label)
+            value = cells[1].get_text(strip=True)
+            detail[label] = value
+
+    return detail if detail else None
 
 
 def _mark_name_fallback(detail: dict) -> str:
