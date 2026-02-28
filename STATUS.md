@@ -117,7 +117,47 @@ docker compose exec api alembic upgrade head
 # Verify the latest columns exist:
 docker compose exec db psql -U khrights -d khrights \
   -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'evidence' AND column_name IN ('evidence_kind', 'schema_version');"
+
+# Verify structured evidence fields are populated (raw_text lives inside detail JSONB):
+docker compose exec db psql -U khrights -d khrights -c "
+  SELECT id, source, evidence_kind,
+         detail->>'mark_name'           AS mark_name,
+         detail->>'application_number'  AS app_no,
+         detail->>'owner_name'          AS owner,
+         left(detail->>'raw_text', 80)  AS raw_text_preview,
+         (detail ? 'raw_text')            AS has_raw_text,
+         confidence
+  FROM evidence
+  ORDER BY found_at DESC LIMIT 5;"
 ```
+
+### Dev DB recovery (migration drift)
+
+If `alembic upgrade head` fails because schema objects already exist (e.g.
+`DuplicateTableError` or `DuplicateColumnError`), the DB schema was likely
+created by `Base.metadata.create_all()` at startup while `alembic_version`
+is out of sync.
+
+```bash
+# 1. Check what Alembic thinks the current revision is:
+docker compose exec api alembic current
+
+# 2. If the output is empty or behind, but the actual schema already
+#    matches head, stamp the DB to the latest revision without running
+#    the migrations again:
+docker compose exec api alembic stamp head
+
+# 3. Verify:
+docker compose exec api alembic current
+#    Should print: 002 (head)
+
+# 4. Future migrations will now apply cleanly:
+docker compose exec api alembic upgrade head
+```
+
+> **Note:** Migrations 001 and 002 are idempotent — they check for
+> existing indexes/columns before creating them, so `upgrade head` is
+> safe to run even if the schema already exists.
 
 ## Environment Variables
 
