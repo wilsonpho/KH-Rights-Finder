@@ -33,3 +33,7 @@ uvicorn==0.39.0
 uvloop==0.22.1
 watchfiles==1.1.1
 websockets==15.0.1
+pypdf==6.7.2
+PyMuPDF==1.26.5
+pytesseract==0.3.13
+Pillow==11.3.0

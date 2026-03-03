@@ -87,6 +87,8 @@ class ExclusiveRightsEvidenceV1(BaseModel):
     principal: Optional[str] = None
     scope: Optional[Literal["import", "distribution", "both"]] = None
 
+    reference_number: Optional[str] = None
+
     valid_from: Optional[date] = None
     valid_from_raw: Optional[str] = None
     valid_to: Optional[date] = None
@@ -152,6 +154,10 @@ _EXCLUSIVE_FIELD_MAP: Dict[str, str] = {
     "rights holder": "rights_holder",
     "principal": "principal",
     "scope": "scope",
+    "reference_number": "reference_number",
+    "ref": "reference_number",
+    "certificate": "reference_number",
+    "decision": "reference_number",
     "valid_from": "valid_from_raw",
     "valid from": "valid_from_raw",
     "valid_to": "valid_to_raw",
@@ -187,6 +193,7 @@ def parse_evidence(
     lower confidence.
     """
     raw_text = detail.pop("_raw_text", None)
+    pdf_warnings: List[str] = detail.pop("_pdf_warnings", [])
     json_text = json.dumps(detail, sort_keys=True, default=str)
     raw_text = raw_text or json_text
 
@@ -201,6 +208,11 @@ def parse_evidence(
     normalised["raw_text"] = raw_text
 
     warnings: List[str] = list(normalised.get("parse_warnings", []))
+    warnings.extend(pdf_warnings)
+
+    # For exclusive rights: extract structured fields from PDF/OCR text
+    if evidence_kind == "exclusive_rights" and raw_text and len(raw_text) > 200:
+        _enrich_from_pdf_text(normalised, raw_text, warnings)
 
     date_fields = (
         _TRADEMARK_DATE_FIELDS if evidence_kind == "trademark" else _EXCLUSIVE_DATE_FIELDS
@@ -253,3 +265,26 @@ def _normalise_class_numbers(d: dict) -> None:
     if raw and isinstance(raw, str):
         parts = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
         d["class_numbers"] = parts if parts else None
+
+
+_EXCLUSIVE_EXTRACTED_KEYS = (
+    "rights_holder", "scope", "reference_number",
+    "valid_from_raw", "valid_to_raw",
+)
+
+
+def _enrich_from_pdf_text(
+    normalised: dict, raw_text: str, warnings: List[str]
+) -> None:
+    """Merge PDF-extracted fields into normalised dict (listing values win)."""
+    from app.scrapers.dip_exclusive import extract_exclusive_rights_fields
+
+    extracted = extract_exclusive_rights_fields(raw_text)
+    extraction_warnings = extracted.pop("parse_warnings", [])
+    warnings.extend(extraction_warnings)
+
+    for key in _EXCLUSIVE_EXTRACTED_KEYS:
+        if key not in normalised or normalised[key] is None:
+            val = extracted.get(key)
+            if val is not None:
+                normalised[key] = val

@@ -1,6 +1,6 @@
 # KH Rights Finder — Project Status
 
-Last updated: 2026-02-27 (commit `145ec4a`)
+Last updated: 2026-02-28 (commit `0453912`)
 
 ## What This Project Does
 
@@ -36,6 +36,7 @@ backend/
     db.py                — async engine + session factory
     config.py            — Settings (DATABASE_URL, SCRAPER_DEBUG)
     worker.py            — Worker loop: poll jobs → run scraper → store evidence
+    evidence_schemas.py  — TrademarkEvidenceV1, ExclusiveRightsEvidenceV1, parse_evidence(), FIELD_MAPs
     scoring.py           — compute_score() — weights evidence into a 0-100 score
     routers/
       search.py          — POST /api/search, GET /api/search/{mark_id}, POST /api/search/{mark_id}/retry
@@ -44,7 +45,7 @@ backend/
     scrapers/
       base.py            — BaseScraper ABC + ScraperResult dataclass + registry
       dip_trademark.py   — DIP trademark search (ASP.NET WebForms: GET form → extract hidden fields → POST)
-      dip_exclusive.py   — DIP exclusive rights search
+      dip_exclusive.py   — DIP exclusive rights listing + PDF OCR (extract_pdf_text, extract_exclusive_rights_fields)
       secondary.py       — Secondary/informational sources
 
 frontend/
@@ -66,27 +67,29 @@ frontend/
 
 - **Search + ingestion pipeline**: brand search → job creation → worker picks up → scraper runs → evidence stored → UI displays results.
 - **DIP trademark scraper**: correctly submits ASP.NET WebForms (auto-discovers textbox, submit button, includes all hidden fields like `__VIEWSTATE`, `__PREVIOUSPAGE`). Returns real results (e.g., Unilever: 144 records, Coca-Cola: records with owner/address/application #).
+- **Structured evidence fields**: scraper now correctly parses the nested DIP GridView HTML (`<h5>` mark name + `<table class="info-list-detail">` label/value rows). `TrademarkEvidenceV1` fields (`mark_name`, `owner_name`, `application_number`, `filing_date`, etc.) populate correctly. Missing fields stay `null` (never inferred).
+- **Evidence `raw_text`**: each record gets a clean, human-readable `raw_text` (stored in `evidence.detail->>'raw_text'`), not a JSON blob. Full HTML snapshots are preserved separately in the `snapshots` table.
+- **Idempotent Alembic migrations**: migrations 001 and 002 use `IF NOT EXISTS` / `pg_indexes` checks so `alembic upgrade head` never crashes on a DB where `create_all()` already ran.
 - **Worker stability**: loop runs continuously, job idempotency prevents duplicates, stale-job reaper auto-fails jobs stuck >10 min.
 - **UI**: search → results page with polling → evidence cards + score breakdown + watchlist.
 - **EvidenceCard**: filters malformed scraper data (clean vs raw), progressive disclosure via `<details>`, no horizontal overflow.
+- **Exclusive rights (Task 3)**:
+  - **Listing scraper**: `dip_exclusive` fetches the DIP exclusive-rights page, matches brand names to PDF links, returns `ScraperResult` with `brand`, `pdf_url`, `href`, `page`.
+  - **PDF text extraction**: `extract_pdf_text(pdf_bytes)` in `dip_exclusive.py` — pypdf text-layer first; if &lt;200 chars, OCR fallback via PyMuPDF + pytesseract at 300 DPI (max 3 pages). Returns `(text, warnings)`; never raises. Dockerfile installs `tesseract-ocr`.
+  - **Evidence mapping**: `extract_exclusive_rights_fields(text)` extracts from certificate text: `rights_holder` (company regex), `scope` (import/distribution/both), `reference_number` (KH/…), `valid_from_raw` / `valid_to_raw` (contextual date regexes). Listing values take precedence; no inference — missing fields stay `null` with `parse_warnings`.
+  - **parse_evidence**: For `dip_exclusive` with `_raw_text` &gt;200 chars, `_enrich_from_pdf_text()` merges extracted fields; `_pdf_warnings` flow into `parse_warnings`. Schema: `ExclusiveRightsEvidenceV1` includes `reference_number`.
+  - **Tests**: `tests/test_dip_exclusive_rights_pdf_extraction.py` (20 tests) + fixtures `fixtures/dip_exclusive_rights/listing_example.html`, `certificate_example.pdf` (real Ford certificate, scanned). Tests cover OCR, extraction, ambiguous-dates warning, listing precedence.
 
 ## Known Issues / Technical Debt
 
-### Scraper data quality (backend — `dip_trademark.py`)
-The DIP site's HTML table structure causes the row parser (`_extract_table_rows`) to produce malformed key/value pairs:
-- Some keys are data values (e.g., `"unilever n.v."` as a key instead of `"owner name"`)
-- Some values are labels (e.g., `"Owner Address:"` as a value)
-- Some keys are giant concatenated strings (160+ chars of merged field data)
+### ~~Scraper data quality~~ (FIXED)
+Previously, `_extract_table_rows` assumed a flat header-row + data-rows table, but the DIP GridView uses nested layout tables. This produced garbled key/value pairs. **Fixed in commit `0453912`**: parser now walks each outer `<tr>`, finds `<h5>` (mark name) and `<table class="info-list-detail">` (label/value rows), normalises labels (strip colons, collapse whitespace, lowercase), and maps them via `_TRADEMARK_FIELD_MAP` so `TrademarkEvidenceV1` fields populate.
 
-**Current mitigation**: frontend `EvidenceCard` uses heuristics (`isCleanEntry()`) to filter clean fields from junk. The junk is hidden behind a "Show raw data" toggle.
+### ~~Evidence title always "Unknown mark"~~ (FIXED)
+The scraper now extracts the mark name from the `<h5>` element and sets `ScraperResult.title` correctly.
 
-**Proper fix would be**: improve `_extract_table_rows` to correctly parse the DIP table headers/rows. The issue is likely that the table has nested elements or `colspan` that the simple `<tr>/<td>` iteration doesn't handle.
-
-### Evidence title always "Unknown mark"
-The scraper can't find the mark name in the parsed table data (headers don't match expected keys like `"mark"` or `"mark name"`). Frontend works around this by passing `markName` prop (the searched brand name) to `EvidenceCard` as a fallback title.
-
-### Score always shows "15 Weak"
-Only DIP trademark returns results currently. Scoring may need tuning once more sources produce data.
+### Score display
+DIP trademark and DIP exclusive both feed into scoring (trademark 0–60 pts, exclusive 0–40 pts). Score label may need tuning as more sources produce data.
 
 ### No pagination
 180 evidence cards render at once for Unilever. Should paginate or virtualize.
@@ -94,6 +97,10 @@ Only DIP trademark returns results currently. Scoring may need tuning once more 
 ## Git History
 
 ```
+(working)  Task 3: Exclusive rights — PDF OCR, extract_exclusive_rights_fields, evidence mapping
+0453912 Fix dip_trademark extraction and structured evidence fields (Task 2)
+ecf83c4 Fix dip_trademark parsing and evidence mapping (Task 2)
+491008c Add evidence schemas, validation pipeline, and Alembic migration
 145ec4a Fix EvidenceCard overflow, title fallback, and field rendering
 7c10bbe Ignore local scraper snapshots
 3d6437c Checkpoint: worker stability + trademark WebForms submission
@@ -106,6 +113,19 @@ docker compose up --build
 # web:    http://localhost:3000
 # api:    http://localhost:8000/docs
 # debug:  SCRAPER_DEBUG=1 docker compose up worker
+```
+
+### Running tests
+
+```bash
+# All backend tests (inside Docker):
+docker compose exec api python -m pytest tests/ -v
+
+# Trademark + evidence schema tests:
+docker compose exec api python -m pytest tests/test_dip_trademark_parser.py tests/test_evidence_schemas.py -v
+
+# Exclusive rights PDF extraction + mapping tests (requires tesseract-ocr in image):
+docker compose exec api python -m pytest tests/test_dip_exclusive_rights_pdf_extraction.py -v
 ```
 
 ### Applying database migrations
